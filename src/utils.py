@@ -4,7 +4,7 @@ import logging
 
 from tqdm import tqdm
 
-from src.config import DATA_PATH
+from config import DATA_PATH
 
 
 class TqdmHandler(logging.StreamHandler):

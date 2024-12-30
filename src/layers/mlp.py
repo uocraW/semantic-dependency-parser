@@ -2,7 +2,7 @@
 
 import torch.nn as nn
 
-from src.layers.dropout import SharedDropout
+from layers.dropout import SharedDropout
 
 
 class MLP(nn.Module):

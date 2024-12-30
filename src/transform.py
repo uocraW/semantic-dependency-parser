@@ -9,22 +9,22 @@ from torch.utils.data import dataset, dataloader
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
-from src.config import TRAIN_PATH, DATA_PATH, DEV_PATH
-
+# from src.config import TRAIN_PATH, DATA_PATH, DEV_PATH
+from config import TRAIN_PATH, DATA_PATH, DEV_PATH
 
 class CoNLLSentence(object):
     def __init__(self, lines: List[str]):
-        self.values = []
-        # record annotations for post-recovery
+        self.values = [] # each line store a word with all info
         self.annotations = dict()
 
         for i, line in enumerate(lines):
             value = line.split('\t')
             if value[0].startswith('#') or not value[0].isdigit():
+                # negetive index for annotations or invalid lines
                 self.annotations[-i - 1] = line
-            else:
-                self.annotations[len(self.values)] = line
-                self.values.append(value)
+                continue
+            self.annotations[len(self.values)] = line
+            self.values.append(value)
         self.values = list(zip(*self.values))
 
     def __repr__(self):
@@ -43,23 +43,24 @@ class CoNLLSentence(object):
         return self.values[3]
 
     def get_labels(self):
-        sequence = self.values[8]
-        labels = [[None] * (len(sequence) + 1) for _ in range(len(sequence) + 1)]
-        for i, s in enumerate(sequence, 1):
-            if s != '_':
-                for pair in s.split('|'):
-                    edge, label = pair.split(':')
-                    labels[i][int(edge)] = label
+        all_edges, all_labels = self.values[6], self.values[7]
+        labels = [[None] * (len(all_labels) + 1) for _ in range(len(all_labels) + 1)]
+        for i in range(len(all_edges)):
+            edge, label = all_edges[i], all_labels[i]
+            if edge != "_" and label != "???":
+                # label: [length+1, length+1] start from index 1
+                labels[i+1][int(edge)] = label
         return labels
 
     def __len__(self):
         return len(self.words)
 
-
-def get_labels():
+def get_labels() -> dict:
     if DATA_PATH.joinpath('label_map.json').exists():
         with open(DATA_PATH.joinpath('label_map.json'), 'r') as f:
             return json.loads(f.read())
+
+    # process and make a label_map
     label_map = {'[PAD]': 0}
 
     def _i(path):
@@ -85,7 +86,7 @@ def get_labels():
     return label_map
 
 
-def get_tags():
+def get_tags() -> dict:
     if DATA_PATH.joinpath('tag_map.json').exists():
         with open(DATA_PATH.joinpath('tag_map.json'), 'r') as f:
             return json.loads(f.read())
@@ -154,12 +155,14 @@ class SDPTransform(dataset.Dataset):
             i += 1
 
         # 统计下
-        # l = {}
-        # for sentence in self.sentences:
-        #     ll = len(sentence) // 10
-        #     l.setdefault(ll, 0)
-        #     l[ll] += 1
-        # print(l)
+        l = {}
+        for sentence in self.sentences:
+            ll = len(sentence) // 10
+            l.setdefault(ll, 0)
+            l[ll] += 1
+        print("句子长度情况: ", l)
+
+        # 过滤 排序 只保留长度小于100的句子
         self.sentences = sorted([i for i in self.sentences if len(i) < 100], key=lambda x: len(x))
 
     def __len__(self):
@@ -197,12 +200,13 @@ class SDPTransform(dataset.Dataset):
         return subwords.to(self.device), tags_matrix.to(self.device), labels_matrix.to(self.device)
 
     def to_dataloader(self, batch_size, shuffle):
+        print("数据长度: ", len(self))
         return dataloader.DataLoader(self, batch_size=batch_size, shuffle=shuffle, collate_fn=self.collate_fn)
 
 
 if __name__ == '__main__':
     for subwords, tags, labels in SDPTransform(
             path=TRAIN_PATH,
-            transformer='hfl/chinese-electra-180g-small-discriminator'
+            transformer='/data/hfmodel/bert-base-chinese'
     ).to_dataloader(batch_size=32, shuffle=False):
         assert (subwords.size(1) == tags.size(1) == labels.size(1) == labels.size(2))

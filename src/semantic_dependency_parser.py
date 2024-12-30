@@ -8,18 +8,18 @@ from torch import nn
 from tqdm import tqdm
 from transformers import AutoTokenizer, AdamW, get_linear_schedule_with_warmup, set_seed
 
-from src.config import MODEL_PATH
-from src.metric import ChartMetric
-from src.model import SemanticDependencyModel
-from src.transform import get_labels, SDPTransform, get_tags
-from src.utils import logger
+from config import MODEL_PATH
+from metric import ChartMetric
+from model import SemanticDependencyModel
+from transform import get_labels, SDPTransform, get_tags
+from utils import logger
 
 
 class SemanticDependencyParser(object):
     def __init__(self):
         self.model: Optional[SemanticDependencyModel, None] = None
         self.tokenizer = None
-        self.device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+        self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
         self.labels = get_labels()
         self.tags = get_tags()
@@ -82,7 +82,7 @@ class SemanticDependencyParser(object):
 
     def fit(self, train_path, dev_path, epoch=100, lr=1e-3, pretrained_model_name=None, batch_size=32,
             warmup_steps=0.1):
-        set_seed(seed=123231)
+        set_seed(seed=10403)
 
         self.build_tokenizer(pretrained_model_name=pretrained_model_name)
 
@@ -217,6 +217,33 @@ class SemanticDependencyParser(object):
 
     def load_weights(self, save_path):
         if not isinstance(self.model, nn.DataParallel):
-            self.model.load_state_dict(torch.load(save_path))
+            self.model.load_state_dict(torch.load(save_path), strict=False)
         else:
-            self.model.module.load_state_dict(torch.load(save_path))
+            self.model.module.load_state_dict(torch.load(save_path), strict=False)
+
+    
+    @torch.no_grad()
+    def mst_evaluate(self, dev):
+        self.model.eval()
+
+        total_loss, metric = 0, ChartMetric()
+
+        for data in tqdm(dev, desc='evaluate'):
+            subwords, tags, labels = data
+            word_mask = subwords.ne(self.tokenizer.pad_token_id)
+            mask = word_mask if len(subwords.shape) < 3 else word_mask.any(-1)
+            mask = mask.unsqueeze(1) & mask.unsqueeze(2)
+            mask[:, 0] = 0
+            s_edge, s_label = self.model(subwords, tags)
+            loss = self.model.loss(s_edge, s_label, labels, mask)
+            total_loss += loss.item()
+
+            label_preds = self.model.decode_mst(s_edge, mask)
+            # if not label_preds.eq(-1).all():
+            #     print('debug')
+            metric(label_preds.masked_fill(~mask, -1), labels.masked_fill(~mask, -1))
+        total_loss /= len(dev)
+
+        return total_loss, metric
+
+    loaded = False

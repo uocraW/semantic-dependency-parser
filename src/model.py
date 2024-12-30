@@ -2,10 +2,13 @@
 #
 import torch
 from torch import nn
+import numpy
 
-from src.layers.affine import Biaffine
-from src.layers.mlp import MLP
-from src.layers.transformer import TransformerEmbedding
+from layers.affine import Biaffine
+from layers.mlp import MLP
+from layers.transformer import TransformerEmbedding
+
+from allennlp.nn.chu_liu_edmonds import decode_mst
 
 
 class SemanticDependencyModel(nn.Module):
@@ -25,7 +28,7 @@ class SemanticDependencyModel(nn.Module):
         self.label_mlp_d = MLP(n_in=self.encoder.n_out + self.tag_embedding.embedding_dim, n_out=n_label_mlp, dropout=0.33)
         self.label_mlp_h = MLP(n_in=self.encoder.n_out + self.tag_embedding.embedding_dim, n_out=n_label_mlp, dropout=0.33)
 
-        self.edge_attn = Biaffine(n_in=n_edge_mlp, n_out=2, bias_x=True, bias_y=True)
+        self.edge_attn = Biaffine(n_in=n_edge_mlp, n_out=1, bias_x=True, bias_y=True)
         self.label_attn = Biaffine(n_in=n_label_mlp, n_out=n_labels, bias_x=True, bias_y=True)
         self.criterion = nn.CrossEntropyLoss()
 
@@ -61,6 +64,7 @@ class SemanticDependencyModel(nn.Module):
 
     def loss(self, s_edge, s_label, labels, mask, interpolation=0.1):
         # self._loss2(s_edge, s_label, labels, mask, interpolation)
+        # interpolation -> importance of label
 
         edge_mask = labels.ge(0) & mask
         edge_loss = self.criterion(s_edge[mask], edge_mask[mask].long())
@@ -69,3 +73,17 @@ class SemanticDependencyModel(nn.Module):
 
     def decode(self, s_edge, s_label):
         return s_label.argmax(-1).masked_fill_(s_edge.argmax(-1).lt(1), -1)
+
+    def decode_mst(self, s_edge: torch.Tensor, mask: torch.Tensor):
+        lengths = mask.sum(dim=1).long().cpu().numpy()
+
+        predicted_heads = []
+
+        for edge_scores, length in zip(s_edge.detach().cpu(), lengths):
+            edge_scores[:, 0] = 0
+
+            instance_heads, _ = decode_mst(edge_scores.numpy(), length, has_labels=False)
+            instance_heads[0] = 0
+            predicted_heads.append(instance_heads)
+
+        return torch.from_numpy(numpy.stack(predicted_heads)).to(s_edge.device)

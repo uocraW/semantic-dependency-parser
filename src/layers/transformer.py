@@ -3,7 +3,7 @@ from torch import nn
 from torch.nn.utils.rnn import pad_sequence
 from transformers import AutoModel
 
-from src.layers.scale_mix import ScalarMix
+from layers.scale_mix import ScalarMix
 
 
 class TransformerEmbedding(nn.Module):
