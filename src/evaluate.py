@@ -1,18 +1,22 @@
 # -*- coding: utf8 -*-
 #
 
+
 import torch
-from config import MODEL_PATH, DEV_PATH
+from config import DEV_PATH, PRETRAIN_MODEL_PATH
 from semantic_dependency_parser import SemanticDependencyParser
 import os
-# os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3, 4, 5, 6, 7'
+
+import pathlib
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+
+eva_model_path = str(pathlib.Path('.').parent.joinpath('savepoint').joinpath('savepoint_412_bilstm').joinpath('dev_metric_8.8862e-01.pt'))
 
 
 m = SemanticDependencyParser()
 m.load(
-    pretrained_model_name='/data/chd/bert-base-chinese',
-    model_path=str(MODEL_PATH.joinpath('dev_metric_3.4178e-01.pt')),
+    pretrained_model_name=PRETRAIN_MODEL_PATH,
+    model_path=eva_model_path,
     device='cuda' if torch.cuda.is_available() else 'cpu'
 )
 
@@ -24,5 +28,5 @@ dev = m.build_dataloader(
     shuffle=False
 )
 
-m.mst_evaluate(dev)
-# m.evaluate_dataloader(dev)
+# print(m.mst_evaluate_dataloader(dev))
+print(m.evaluate_dataloader(dev))

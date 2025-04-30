@@ -122,7 +122,7 @@ class TransformerEmbedding(nn.Module):
 
         return embed
 
-# TODO: 改成这个试试
+# TODO: 这里是采用首字作为整个词的embedding，把它改成首字作为整个句的embeddig
 class TransformerWordEmbedding(torch.nn.Module):
     def __init__(self, transformer: str, ):
         super(TransformerWordEmbedding, self).__init__()
