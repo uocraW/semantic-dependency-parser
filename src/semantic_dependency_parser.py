@@ -259,14 +259,7 @@ class SemanticDependencyParser(object):
             # if not label_preds.eq(-1).all():
             #     print('debug')
 
-            label_preds = self.model.decode(s_edge, s_label)    # (B, L+1, L+1)
-
-            # ---------- 让三者同尺寸 ----------
-            L = s_edge.size(1)                                  # 真实节点数 (不含 ROOT)
-            label_preds = label_preds[:, :L, :L]
-            labels      = labels[:,  :L, :L]
-            mask        = mask[:,    :L, :L]
-
+            label_preds = self.model.decode(s_edge, s_label)
             metric(label_preds.masked_fill(~mask, -1), labels.masked_fill(~mask, -1))
         total_loss /= len(dev)
 

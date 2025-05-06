@@ -16,7 +16,7 @@ DIALOGUE_TRAIN_PATH = DIALOGUE_DATA_PATH.joinpath('test.json')
 DIALOGUE_TEST_PATH = DIALOGUE_DATA_PATH.joinpath('train.json')
 DIALOGUE_DEV_PATH = DIALOGUE_DATA_PATH.joinpath('train.json')
 
-MODEL_PATH = pathlib.Path('.').joinpath('savepoint').joinpath('dialogue').joinpath('savepoint_505')
+MODEL_PATH = pathlib.Path('.').joinpath('savepoint').joinpath('dialogue').joinpath('savepoint_506')
 
 #########################################################################
 
@@ -29,7 +29,7 @@ EDU_TRAIN_PATH = EDU_DATA_PATH.joinpath('train.json')
 EDU_TEST_PATH = EDU_DATA_PATH.joinpath('test.json')
 EDU_DEV_PATH = EDU_DATA_PATH.joinpath('train.json')
 
-MODEL_PATH = pathlib.Path('.').joinpath('savepoint').joinpath('edu').joinpath('savepoint_506')
+# MODEL_PATH = pathlib.Path('.').joinpath('savepoint').joinpath('edu').joinpath('savepoint_506')
 
 #########################################################################
 

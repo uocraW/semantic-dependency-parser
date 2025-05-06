@@ -367,8 +367,10 @@ class EDUCutTransform(dataset.Dataset):
             # 写入（位置 1 开始，因为 0 给 [CLS]）
             tag_tensor[i, 1:1+len(tag_ids)] = torch.tensor(tag_ids, dtype=torch.long)
 
-        label_tensor = torch.full((B, L_tok, L_tok), fill_value=-1, dtype=torch.long)
-
+        label_tensor = torch.full(
+            (B, L_tok, L_tok),
+            fill_value=-1, dtype=torch.long
+        )
         for b_idx, sent in enumerate(batch):
             for dep_idx, arcs in enumerate(sent['edges']):    # dep_idx: 0-based
                 row = dep_idx + 1                             # +1 对齐 [CLS]/ROOT
@@ -421,13 +423,9 @@ class DialogueTransform(dataset.Dataset):
                     continue
                 dep, head = s_src, s_tgt
                 edges[dep].append((head + 1, rel))
-                ### test
-                if abs(s_src - s_tgt) >= 2:
-                    print(dia["id"], s_src, s_tgt)
-                ### test
+
             self.dialogs.append({"sents": sents, "edges": edges})
 
-        # ④ 按句子数排序，减少 padding
         self.dialogs.sort(key=lambda d: len(d["sents"]))
 
 
@@ -457,26 +455,30 @@ class DialogueTransform(dataset.Dataset):
 
         L_max = max(v.size(0) for v in vec_chunks)
         B = len(batch)
-        subwords = torch.zeros(B, L_max, hidden, device=self.device)
+        subwords = torch.zeros(B, L_max, hidden)
         for i, v in enumerate(vec_chunks):
             subwords[i, :v.size(0)] = v
 
         # ---------- 2. dummy tags ----------
-        tags = torch.zeros(B, L_max, dtype=torch.long, device=self.device)
+        tags = torch.zeros(B, L_max, dtype=torch.long)
 
         # ---------- 3. 依存矩阵 ----------
         labels = torch.full(
-            (B, L_max + 1, L_max + 1),
-            fill_value=-1, dtype=torch.long, device=self.device
+            (B, L_max, L_max),
+            fill_value=-1, dtype=torch.long
         )
         for b, d in enumerate(batch):
             for dep, arcs in enumerate(d["edges"]):
                 row = dep + 1
                 for head, rel in arcs:
-                    if head <= L_max:
+                    if head < L_max:
                         labels[b, row, head] = self.labels[rel]
 
-        return subwords, tags, labels
+        return (
+            subwords.to(self.device),
+            tags.to(self.device),
+            labels.to(self.device)
+        )
 
     def to_dataloader(self, batch_size, shuffle=True):
         return dataloader.DataLoader(self, batch_size=batch_size,

@@ -379,14 +379,7 @@ class SemanticDependencyModel(nn.Module):
     # interpolation： importance of label
     def loss(self, s_edge, s_label, labels, mask, interpolation=0.1):
         # self._loss2(s_edge, s_label, labels, mask, interpolation)
-        # interpolation -> importance of label
-        
-        L = s_edge.size(1)               # 真实节点数 (不含 ROOT)
-        if labels.size(1) != L:
-            labels = labels[:, :L, :L]   # 裁掉 ROOT 行列
-        if mask.size(1) != L:
-            mask = mask[:,:L, :L]
-        
+        # interpolation -> importance of label        
         edge_mask = labels.ge(0) & mask
         edge_loss = self.criterion(s_edge[mask], edge_mask[mask].long())
         label_loss = self.criterion(s_label[edge_mask], labels[edge_mask])

@@ -19,29 +19,29 @@ from semantic_dependency_parser import SemanticDependencyParser
 # )
 
 # --- edu切分parser ---
-SemanticDependencyParser(
-    enable_tag=True,        # 是否使用tag
-    config=EDU
-).fit(
-    train_path=EDU_TEST_PATH,
-    dev_path=EDU_TRAIN_PATH,
-    pretrained_model_name=PRETRAIN_MODEL_PATH,
-    lr_transformer=2e-5,
-    lr_model=1e-3,
-    batch_size=32,
-    epoch=100,
-)
-
-# --- 对话parser ---
 # SemanticDependencyParser(
-#     enable_tag=False,        # 是否使用tag
-#     config=DIALOGUE
+#     enable_tag=True,        # 是否使用tag
+#     config=EDU
 # ).fit(
-#     train_path=DIALOGUE_TEST_PATH,
-#     dev_path=DIALOGUE_TRAIN_PATH,
+#     train_path=EDU_TEST_PATH,
+#     dev_path=EDU_TRAIN_PATH,
 #     pretrained_model_name=PRETRAIN_MODEL_PATH,
 #     lr_transformer=2e-5,
 #     lr_model=1e-3,
 #     batch_size=32,
 #     epoch=100,
 # )
+
+# --- 对话parser ---
+SemanticDependencyParser(
+    enable_tag=False,        # 是否使用tag
+    config=DIALOGUE
+).fit(
+    train_path=DIALOGUE_TRAIN_PATH,
+    dev_path=DIALOGUE_TEST_PATH,
+    pretrained_model_name=PRETRAIN_MODEL_PATH,
+    lr_transformer=2e-5,
+    lr_model=1e-3,
+    batch_size=32,
+    epoch=100,
+)
