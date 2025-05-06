@@ -1,0 +1,6 @@
+hanlp==2.1.1
+numpy==2.2.5
+openai==1.77.0
+torch==2.0.1+cu118
+tqdm==4.66.4
+transformers==4.46.3

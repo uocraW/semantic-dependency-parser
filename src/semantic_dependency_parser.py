@@ -8,10 +8,10 @@ from torch import nn
 from tqdm import tqdm
 from transformers import AutoTokenizer, AdamW, get_linear_schedule_with_warmup, set_seed
 
-from config import MODEL_PATH, SENTENCE, DIALOGUE
+from config import MODEL_PATH, SENTENCE, EDU, DIALOGUE
 from metric import ChartMetric, EvaluateMetric
 from model import SemanticDependencyModel
-from transform import get_labels, SDPTransform, get_tags, EDUCutTransform, get_dialogue_labels, get_dialogue_tags
+from transform import get_labels, SDPTransform, get_tags, EDUCutTransform, get_edu_labels, get_edu_tags, get_dialogue_labels, DialogueTransform
 from utils import logger
 
 class SemanticDependencyParser(object):
@@ -22,19 +22,28 @@ class SemanticDependencyParser(object):
         if config == SENTENCE:
             self.labels = get_labels()
             self.tags = get_tags()
+        elif config == EDU:
+            self.labels = get_edu_labels()
+            self.tags = get_edu_tags()
         else:
             self.labels = get_dialogue_labels()
-            self.tags = get_dialogue_tags()
         self.enable_tag = enable_tag
         self.config = config
 
     def build_model(self, transformer):
-        self.model = SemanticDependencyModel(
-            transformer=transformer,
-            n_labels=len(self.labels),
-            n_tags=len(self.tags),
-            enable_tag=self.enable_tag
-        )
+        if self.enable_tag:
+            self.model = SemanticDependencyModel(
+                transformer=transformer,
+                n_labels=len(self.labels),
+                n_tags=len(self.tags),
+                enable_tag=self.enable_tag
+            )
+        else:
+                self.model = SemanticDependencyModel(
+                transformer=transformer,
+                n_labels=len(self.labels),
+                enable_tag=self.enable_tag
+            )
         self.model.to(self.device)
         logger.info(self.model)
         return self.model
@@ -103,8 +112,14 @@ class SemanticDependencyParser(object):
                 transformer=transformer,
                 device=self.device
             ).to_dataloader(batch_size=batch_size, shuffle=shuffle)
-        elif config == DIALOGUE:
+        elif config == EDU:
             return EDUCutTransform(
+                path=path,
+                transformer=transformer,
+                device=self.device
+            ).to_dataloader(batch_size=batch_size, shuffle=shuffle)
+        else:
+            return DialogueTransform(
                 path=path,
                 transformer=transformer,
                 device=self.device
@@ -202,7 +217,12 @@ class SemanticDependencyParser(object):
         total_loss = 0.
 
         for data in tqdm(train, desc='fit_dataloader'):
-            subwords, tags, labels = data
+            if len(data) == 3:
+                subwords, tags, labels = data
+            else:
+                subwords, labels = data
+                tags = None
+
             word_mask = subwords.ne(self.tokenizer.pad_token_id)
             mask = word_mask if len(subwords.shape) < 3 else word_mask.any(-1)
             mask = mask.unsqueeze(1) & mask.unsqueeze(2)
@@ -223,7 +243,12 @@ class SemanticDependencyParser(object):
         total_loss, metric = 0, EvaluateMetric()
 
         for data in tqdm(dev, desc='evaluate_dataloader'):
-            subwords, tags, labels = data
+            if len(data) == 3:
+                subwords, tags, labels = data
+            else:
+                subwords, labels = data
+                tags = None
+
             word_mask = subwords.ne(self.tokenizer.pad_token_id)
             mask = word_mask if len(subwords.shape) < 3 else word_mask.any(-1)
             mask = mask.unsqueeze(1) & mask.unsqueeze(2)
@@ -231,10 +256,17 @@ class SemanticDependencyParser(object):
             s_edge, s_label = self.model(subwords, tags)
             loss = self.model.loss(s_edge, s_label, labels, mask)
             total_loss += loss.item()
-
-            label_preds = self.model.decode(s_edge, s_label)
             # if not label_preds.eq(-1).all():
             #     print('debug')
+
+            label_preds = self.model.decode(s_edge, s_label)    # (B, L+1, L+1)
+
+            # ---------- 让三者同尺寸 ----------
+            L = s_edge.size(1)                                  # 真实节点数 (不含 ROOT)
+            label_preds = label_preds[:, :L, :L]
+            labels      = labels[:,  :L, :L]
+            mask        = mask[:,    :L, :L]
+
             metric(label_preds.masked_fill(~mask, -1), labels.masked_fill(~mask, -1))
         total_loss /= len(dev)
 

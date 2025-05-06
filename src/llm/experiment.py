@@ -121,7 +121,6 @@ def call_llm(prompt):
         )
     except Exception as e:
         print(f"Warning: LLM call encountered an error, skipping this case. Error detail: {e}")
-        # 返回空字符串或你想要的默认值
         return ""
     return response.choices[0].message.content
 
@@ -145,7 +144,6 @@ def parse_llm_output(llm_response):
             continue
         cols = re.split(r'\s+', line)
         if len(cols) < 4:
-            # 如果列不够，跳过或做兼容
             continue
         try:
             token_id = int(cols[0])
@@ -154,7 +152,6 @@ def parse_llm_output(llm_response):
             deprel = cols[3]
             predicted_sentence.append((token_id, form, head, deprel))
         except ValueError:
-            # 如果解析整数失败等情况，视为异常行，跳过或记录
             continue
     return predicted_sentence
 
@@ -165,9 +162,7 @@ def calc_uas_las(gold_sentences, pred_sentences):
     correct_las = 0
 
     for gold_sent, pred_sent in zip(gold_sentences, pred_sentences):
-        # 如果句子长度不一致，可根据需要进行对齐处理，这里简单假设它们行数一致
         for (g_id, g_form, g_head, g_dep), (p_id, p_form, p_head, p_dep) in zip(gold_sent, pred_sent):
-            # 忽略标点等不想计入评估的 token 可以在此处做判断
             total_tokens += 1
 
             # UAS: head 预测正确

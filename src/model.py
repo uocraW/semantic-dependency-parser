@@ -10,11 +10,9 @@ from layers.transformer import TransformerEmbedding
 
 from typing import Tuple, Dict, List, Set
 
-# from allennlp.nn.chu_liu_edmonds import decode_mst
-
 
 class SemanticDependencyModel(nn.Module):
-    def __init__(self, transformer: str, n_labels: int, n_tags: int,
+    def __init__(self, transformer: str, n_labels: int, n_tags: int=0,
                  n_edge_mlp=600, n_label_mlp=600, enable_tag=True):
         super(SemanticDependencyModel, self).__init__()
 
@@ -60,7 +58,7 @@ class SemanticDependencyModel(nn.Module):
 
     def decode_mst(
         self, energy: numpy.ndarray, length: int, has_labels: bool = True
-) -> Tuple[numpy.ndarray, numpy.ndarray]:
+        ) -> Tuple[numpy.ndarray, numpy.ndarray]:
         """
         Note: Counter to typical intuition, this function decodes the _maximum_
         spanning tree.
@@ -343,12 +341,13 @@ class SemanticDependencyModel(nn.Module):
                 break
         return has_cycle, list(cycle)
 
-    def forward(self, subwords, tags):
-        bert_out = self.encoder(subwords)
-
+    def forward(self, subwords, tags=None):
         if self.enable_tag:
+            bert_out = self.encoder(subwords)
             tag_out = self.tag_embedding(tags)
             bert_out = torch.cat([bert_out, tag_out], dim=-1)
+        else:
+            bert_out = subwords
 
         lstm_out, _ = self.lstm(bert_out)
 
@@ -381,7 +380,13 @@ class SemanticDependencyModel(nn.Module):
     def loss(self, s_edge, s_label, labels, mask, interpolation=0.1):
         # self._loss2(s_edge, s_label, labels, mask, interpolation)
         # interpolation -> importance of label
-
+        
+        L = s_edge.size(1)               # 真实节点数 (不含 ROOT)
+        if labels.size(1) != L:
+            labels = labels[:, :L, :L]   # 裁掉 ROOT 行列
+        if mask.size(1) != L:
+            mask = mask[:,:L, :L]
+        
         edge_mask = labels.ge(0) & mask
         edge_loss = self.criterion(s_edge[mask], edge_mask[mask].long())
         label_loss = self.criterion(s_label[edge_mask], labels[edge_mask])

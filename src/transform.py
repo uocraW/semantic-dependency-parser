@@ -7,7 +7,9 @@ import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import dataset, dataloader
 from tqdm import tqdm
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModel
+from typing import Dict
+
 import hanlp
 
 # from src.config import TRAIN_PATH, DATA_PATH, DEV_PATH
@@ -118,7 +120,7 @@ def get_tags() -> dict:
     return tags_map
 
 
-def get_dialogue_labels() -> dict:
+def get_edu_labels() -> dict:
     lm_path = DIALOGUE_DATA_PATH.joinpath('label_map.json')
     if lm_path.exists():
         with open(lm_path, 'r') as f:
@@ -130,17 +132,24 @@ def get_dialogue_labels() -> dict:
         with open(path, 'r', encoding='utf8') as f:
             data = json.load(f)
         for dialog in data:
-            for _, rel, _ in dialog['relationship']:
+            for src, rel, tgt in dialog['relationship']:
+                s_src, _ = map(int, src.split('-'))
+                s_tgt, _ = map(int, tgt.split('-'))
+                # 跳过跨句关系
+                if s_src != s_tgt:
+                    continue
                 if rel not in label_map:
                     label_map[rel] = len(label_map)
+
     _i(DIALOGUE_TRAIN_PATH)
     _i(DIALOGUE_TEST_PATH)
     with open(lm_path, 'w') as f:
+        print("create label_map.json")
         f.write(json.dumps(label_map, ensure_ascii=False, indent=2))
     return label_map
 
 
-def get_dialogue_tags() -> dict:
+def get_edu_tags() -> dict:
     if DIALOGUE_DATA_PATH.joinpath('tag_map.json').exists():
         with open(DIALOGUE_DATA_PATH.joinpath('tag_map.json'), 'r') as f:
             return json.loads(f.read())
@@ -148,6 +157,35 @@ def get_dialogue_tags() -> dict:
         print("can't find tag_map")
         tags = {'[PAD]': 0, 'UNK': 1}           # 只有占位词性
         return tags
+
+
+def get_dialogue_labels() -> dict:
+    lm_path = DIALOGUE_DATA_PATH.joinpath("label_map_dialogue.json")
+    if lm_path.exists():
+        with open(lm_path, 'r') as f:
+            return json.loads(f.read())
+    
+    label_map = {"[PAD]": 0}
+
+    def _i(path):
+        with open(path, 'r', encoding='utf8') as f:
+            data = json.load(f)
+        for dialog in data:
+            for src, rel, tgt in dialog['relationship']:
+                s_src, _ = map(int, src.split('-'))
+                s_tgt, _ = map(int, tgt.split('-'))
+                # 跳过句内关系
+                if s_src == s_tgt:
+                    continue
+                if rel not in label_map:
+                    label_map[rel] = len(label_map)
+
+    _i(DIALOGUE_TRAIN_PATH)
+    _i(DIALOGUE_TEST_PATH)
+    with open(lm_path, 'w') as f:
+        print("create label_map_dialogue.json")
+        f.write(json.dumps(label_map, ensure_ascii=False, indent=2))
+    return label_map
 
 
 def encoder_texts(texts: List[List[str]], tokenizer):
@@ -244,20 +282,6 @@ class SDPTransform(dataset.Dataset):
 
 
 class EDUCutTransform(dataset.Dataset):
-    """
-    读取形如：
-    [
-      {
-        "id": …,
-        "dialog": [{"turn":0, "utterance":…}, …],
-        "relationship": [["0-0","root","0-4"], …]
-      },
-      …
-    ]
-    的文件，生成与 SDPTransform 相同的 (subwords, tags, labels) 张量。
-    path: 数据的path,文件名
-    """
-
     def __init__(self, path: str, transformer: str, device: torch.device = 'cpu'):
         super().__init__()
         self.device = device
@@ -280,13 +304,13 @@ class EDUCutTransform(dataset.Dataset):
 
             # 2. 填充 intra‑sentence 依存边
             for src, rel, tgt in dialog['relationship']:
-                sent_s, idx_s = map(int, src.split('-'))
-                sent_t, idx_t = map(int, tgt.split('-'))
+                sent_t, idx_t = map(int, src.split('-'))
+                sent_s, idx_s = map(int, tgt.split('-'))
                 if sent_s != sent_t:          # 忽略跨句
                     continue
                 dep_idx = idx_s - 1
                 head_idx = idx_t - 1
-                if dep_idx < 0:
+                if head_idx < 0:    # 根节点
                     continue
                 if dep_idx >= len(turns[sent_s]['edges']) or head_idx >= len(turns[sent_s]['edges']):
                     print(f'Skip edge {src}->{tgt} in dialog {dialog["id"]}')
@@ -296,8 +320,9 @@ class EDUCutTransform(dataset.Dataset):
             # 3. 保存到 self.sentences
             self.sentences.extend(turns)
         
-        self.tags = get_dialogue_tags()
-        self.labels = get_dialogue_labels()
+        self.tags = get_edu_tags()
+        self.labels = get_edu_labels()
+        # 是否更新tag_map
         updated = False
         for sent in self.sentences:
             for tag in sent['tags']:
@@ -367,9 +392,107 @@ class EDUCutTransform(dataset.Dataset):
                                         collate_fn=self.collate_fn)
 
 
+class DialogueTransform(dataset.Dataset):
+    def __init__(self,
+                 path: str,
+                 transformer: str,
+                 device: torch.device = "cpu"):
+        super().__init__()
+        self.device = device
+
+        self.tok = AutoTokenizer.from_pretrained(PRETRAIN_MODEL_PATH)
+        self.enc = AutoModel.from_pretrained(PRETRAIN_MODEL_PATH).to(device).eval()
+
+        self.labels = get_dialogue_labels()
+        self.dialogs: List[Dict] = []
+        with open(path, "r", encoding="utf8") as f:
+            raw = json.load(f)
+
+        for dia in tqdm(raw, desc="parse json"):
+            sents = [utt["utterance"] for utt in dia["dialog"]]
+
+            edges = [[] for _ in range(len(sents))]
+            for src, rel, tgt in dia["relationship"]:
+                s_src, _ = map(int, src.split('-'))
+                s_tgt, _ = map(int, tgt.split('-'))
+                if s_src == s_tgt:
+                    continue
+                if s_src >= len(sents) or s_tgt >= len(sents):
+                    continue
+                dep, head = s_src, s_tgt
+                edges[dep].append((head + 1, rel))
+                ### test
+                if abs(s_src - s_tgt) >= 2:
+                    print(dia["id"], s_src, s_tgt)
+                ### test
+            self.dialogs.append({"sents": sents, "edges": edges})
+
+        # ④ 按句子数排序，减少 padding
+        self.dialogs.sort(key=lambda d: len(d["sents"]))
+
+
+    # ---------- Dataset 基本方法 ----------
+    def __len__(self):
+        return len(self.dialogs)
+
+    def __getitem__(self, idx):
+        return self.dialogs[idx]
+
+    # ---------- collate_fn ----------
+    def collate_fn(self, batch: List[Dict]):
+        flat = sum([d["sents"] for d in batch], [])
+        with torch.no_grad():
+            tok = self.tok(
+                flat, return_tensors="pt",
+                padding=True, truncation=True
+            ).to(self.device)
+            cls_vec = self.enc(**tok).last_hidden_state[:, 0]
+
+        hidden = cls_vec.size(-1)
+        vec_chunks, idx = [], 0
+        for d in batch:
+            n = len(d["sents"])
+            vec_chunks.append(cls_vec[idx:idx + n])
+            idx += n
+
+        L_max = max(v.size(0) for v in vec_chunks)
+        B = len(batch)
+        subwords = torch.zeros(B, L_max, hidden, device=self.device)
+        for i, v in enumerate(vec_chunks):
+            subwords[i, :v.size(0)] = v
+
+        # ---------- 2. dummy tags ----------
+        tags = torch.zeros(B, L_max, dtype=torch.long, device=self.device)
+
+        # ---------- 3. 依存矩阵 ----------
+        labels = torch.full(
+            (B, L_max + 1, L_max + 1),
+            fill_value=-1, dtype=torch.long, device=self.device
+        )
+        for b, d in enumerate(batch):
+            for dep, arcs in enumerate(d["edges"]):
+                row = dep + 1
+                for head, rel in arcs:
+                    if head <= L_max:
+                        labels[b, row, head] = self.labels[rel]
+
+        return subwords, tags, labels
+
+    def to_dataloader(self, batch_size, shuffle=True):
+        return dataloader.DataLoader(self, batch_size=batch_size,
+                                     shuffle=shuffle, collate_fn=self.collate_fn)
+
+
+
 if __name__ == '__main__':
-    for subwords, tags, labels in SDPTransform(
-            path=TRAIN_PATH,
-            transformer=PRETRAIN_MODEL_PATH
+    # for subwords, tags, labels in SDPTransform(
+    #         path=TRAIN_PATH,
+    #         transformer=PRETRAIN_MODEL_PATH
+    # ).to_dataloader(batch_size=32, shuffle=False):
+    #     assert (subwords.size(1) == tags.size(1) == labels.size(1) == labels.size(2))
+
+    for sentences, labels, _ in DialogueTransform(
+        path=DIALOGUE_TRAIN_PATH,
+        transformer=PRETRAIN_MODEL_PATH
     ).to_dataloader(batch_size=32, shuffle=False):
-        assert (subwords.size(1) == tags.size(1) == labels.size(1) == labels.size(2))
+        continue
